@@ -10,9 +10,6 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QObject, Signal
 from PySide6.QtGui import QPalette, QColor
 
-# ==========================================
-# سیستم مدیریت زبان با اسکن پوشه محلی
-# ==========================================
 class LangManager(QObject):
     lang_changed = Signal(str)
 
@@ -67,9 +64,7 @@ class LangManager(QObject):
 
 lang_mgr = LangManager()
 
-# ==========================================
-# تب استخراج (با پشتیبانی از Drag & Drop و Validation)
-# ==========================================
+
 class ExtractQuotesTab(QWidget):
     def __init__(self):
         super().__init__()
@@ -182,11 +177,18 @@ class ExtractQuotesTab(QWidget):
                     line = raw_line.rstrip("\n")
                     if line.startswith("\ufeff"):
                         line = line.lstrip("\ufeff")
+
+                    # ===== FIX: خطوط خالی رو با یه placeholder خالی نگه می‌داریم =====
+                    # تا alignment با فایل template حفظ بشه
+                    if line.strip() == "":
+                        self.lines_out.append(None)   # None = خط خالی واقعی
+                        display_lines.append("")
+                        continue
+                    # ================================================================
                     
-                    # بخش Validation (اعتبارسنجی ساختار کوتیشن‌ها)
                     if not self.is_valid_line(line):
                         self.error_lines.append(line_num)
-                        self.lines_out.append("")
+                        self.lines_out.append(None)   # None = خط خالی / خطادار
                         display_lines.append(f"[Line {line_num} Error: Invalid Quotes] -> {line}")
                         continue
                     
@@ -195,7 +197,7 @@ class ExtractQuotesTab(QWidget):
                         self.lines_out.append(quoted_text)
                         display_lines.append(quoted_text)
                     else:
-                        self.lines_out.append("")
+                        self.lines_out.append(None)   # None = خطی که کوتیشن نداره
                         display_lines.append("")
             
             self.text_area.setPlainText("\n".join(display_lines))
@@ -206,9 +208,11 @@ class ExtractQuotesTab(QWidget):
                     f"{lang_mgr.t('error_lines')} {', '.join(map(str, self.error_lines))}"
                 )
             else:
+                # فقط خطوطی که واقعاً متن دارن رو بشمار
+                valid_count = sum(1 for x in self.lines_out if x is not None)
                 QMessageBox.information(
                     self, lang_mgr.t("success_title"), 
-                    lang_mgr.t("done_lines").format(len(self.lines_out))
+                    lang_mgr.t("done_lines").format(valid_count)
                 )
                 
         except Exception as e:
@@ -220,17 +224,17 @@ class ExtractQuotesTab(QWidget):
             return
             
         path, _ = QFileDialog.getSaveFileName(self, lang_mgr.t("save_dialog"), "", "Text Files (*.txt)")
-        if not path: return
+        if not path:
+            return
         try:
             with open(path, "w", encoding="utf-8") as f:
-                f.write("\n".join(self.lines_out))
+                # ===== FIX: None رو به خط خالی تبدیل کن موقع save =====
+                f.write("\n".join(x if x is not None else "" for x in self.lines_out))
             QMessageBox.information(self, lang_mgr.t("success_title"), lang_mgr.t("saved_success"))
         except Exception as e:
             QMessageBox.critical(self, lang_mgr.t("error_title"), lang_mgr.t("error_msg").format(str(e)))
 
-# ==========================================
-# تب جایگذاری (با پشتیبانی از Live Preview و Validation)
-# ==========================================
+
 class ReplaceQuotesTab(QWidget):
     def __init__(self):
         super().__init__()
@@ -297,7 +301,6 @@ class ReplaceQuotesTab(QWidget):
         """)
         main_layout.addWidget(self.process_btn)
         
-        # لایوت افقی برای بخش محتوا و پیش‌نویس زنده (Live Preview)
         content_layout = QHBoxLayout()
         content_layout.setSpacing(10)
         
@@ -308,9 +311,8 @@ class ReplaceQuotesTab(QWidget):
             }
             QTextEdit:focus { border-color: #e74c3c; }
         """)
-        content_layout.addWidget(self.text_area, 3) # ضریب ۳ برای باکس اصلی
+        content_layout.addWidget(self.text_area, 3)
         
-        # باکس پیش‌نمایش زنده (Live Preview Panel)
         self.preview_area = QTextEdit()
         self.preview_area.setReadOnly(True)
         self.preview_area.setStyleSheet("""
@@ -319,7 +321,7 @@ class ReplaceQuotesTab(QWidget):
                 font-size: 11px; color: #7f8c8d; background-color: rgba(0,0,0,0.05);
             }
         """)
-        content_layout.addWidget(self.preview_area, 1) # ضریب ۱ برای کوچک بودن باکس پیش‌نمایش
+        content_layout.addWidget(self.preview_area, 1)
         
         main_layout.addLayout(content_layout, 1)
         
@@ -368,11 +370,11 @@ class ReplaceQuotesTab(QWidget):
         return line.count('"') % 2 == 0
 
     def update_live_preview(self):
-        """به‌روزرسانی کادر پیش‌نمایش متنی کوچک به صورت زنده"""
         preview_text = "--- Template Preview ---\n"
         preview_text += "".join(self.file1_lines[:5])
         preview_text += "\n\n--- Text Replacement Preview ---\n"
-        preview_text += "\n".join(self.file2_lines[:5])
+        # FIX: None رو به "" تبدیل کن تا join کرش نکنه
+        preview_text += "\n".join(x if x is not None else "" for x in self.file2_lines[:5])
         self.preview_area.setPlainText(preview_text)
 
     def load_file1_dialog(self):
@@ -397,8 +399,12 @@ class ReplaceQuotesTab(QWidget):
     def process_file2(self, path):
         try:
             with open(path, "r", encoding="utf-8") as f:
-                self.file2_lines = [line.rstrip("\n").lstrip("\ufeff") for line in f]
-            QMessageBox.information(self, lang_mgr.t("success_title"), lang_mgr.t("loaded_lines").format(len(self.file2_lines)))
+                # ===== FIX: خطوط خالی فایل ۲ رو به None تبدیل کن =====
+                # تا موقع replace، اون‌ها از صف مصرف نشن
+                raw_lines = [line.rstrip("\n").lstrip("\ufeff") for line in f]
+                self.file2_lines = [line if line.strip() != "" else None for line in raw_lines]
+            valid_count = sum(1 for x in self.file2_lines if x is not None)
+            QMessageBox.information(self, lang_mgr.t("success_title"), lang_mgr.t("loaded_lines").format(valid_count))
             self.update_live_preview()
         except Exception as e:
             QMessageBox.critical(self, lang_mgr.t("error_title"), lang_mgr.t("error_msg").format(str(e)))
@@ -418,27 +424,35 @@ class ReplaceQuotesTab(QWidget):
             QMessageBox.warning(self, lang_mgr.t("warning_title"), lang_mgr.t("load_text_first"))
             return
         
-        file2_queue = deque(self.file2_lines)
+        # ===== FIX: فقط مقادیر non-None رو توی صف بذار =====
+        # خطوط خالی فایل ۲ وارد صف نمی‌شن
+        file2_queue = deque(x for x in self.file2_lines if x is not None)
+        # =====================================================
+
         output_lines = []
         self.error_lines = []
         
         for line_num, raw_line in enumerate(self.file1_lines, start=1):
             line = raw_line.rstrip("\n")
             
+            # ===== FIX: خط خالی در template = خط خالی در خروجی، بدون مصرف از صف =====
             if line.strip() == "":
                 output_lines.append("")
                 continue
+            # ===========================================================================
             
-            # بخش Validation در حین عملیات جایگذاری
             if not self.is_valid_line(line):
                 self.error_lines.append(line_num)
                 output_lines.append(f"[Line {line_num} Structural Error] -> {line}")
                 continue
             
-            if file2_queue:
+            # چک کن آیا این خط اصلاً کوتیشن داره؟
+            has_quote = bool(re.search(r'"([^"]*)"', line))
+            
+            if has_quote and file2_queue:
                 rep = file2_queue.popleft()
-                if rep.strip() != "":
-                    line = self.replace_last_quote(line, rep)
+                line = self.replace_last_quote(line, rep)
+            # اگه خط کوتیشن نداره، از صف مصرف نمی‌کنه — خط رو عیناً نگه می‌داره
             
             output_lines.append(line)
         
@@ -463,9 +477,7 @@ class ReplaceQuotesTab(QWidget):
         except Exception as e:
             QMessageBox.critical(self, lang_mgr.t("error_title"), lang_mgr.t("error_msg").format(str(e)))
 
-# ==========================================
-# پنجره اصلی (به همراه سیستم تغییر تم چشمی)
-# ==========================================
+
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
